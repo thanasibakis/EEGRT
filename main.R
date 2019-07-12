@@ -2,48 +2,86 @@ source("read_eeg_mat.R")
 source("visualize.R")
 source("analyze.R")
 
-N200.CHANNELS = c(18, 16, 10, 4, 5, 6, 12, 19)
-P300.CHANNELS = c(54, 79, 78, 77, 76, 75, 71, 67, 61)
-
 ###################
 
-eeg.all.channels = read.eeg.mat("/share/data/cidlab/s112_ses1_sfinal.mat")
+## First, run read_eeg_mat.R
+## For some reason, cluster computing is not working when
+##   the code is in a function scope
+## So, we're keeping it as a script for now.
 
-n200 = eeg %>% filter(Channel %in% N200.CHANNELS)
-n200.no.fast.trials = n200 %>% filter(Reaction.Time >= 0.350)
+eeg.data = read.eeg.mat("/share/data/cidlab/s112_ses1_sfinal.mat")
+eeg.info = eeg.data$Info
 
-for(cond in 1:6)
-{
-  pdf(paste("Channel", cond, ".pdf", sep = ''))
+## We now have eeg.data, which contains the sample values
+##   for each trial and channel combination
+## We also have eeg.info, which contains the reaction times
+##   and conditions of each trial
+## You can left join these by trial when you need reaction times
+##   and samples in the same data frame
+## We also have channel.weights, which specifies the weights to
+##   use when averaging samples over all channels (instead of
+##   using even weights on only some channels)
   
-  (n200 %>%
-    filter(Condition == cond) %>%
-    visualize(upper.bound = 600) +
-      ggtitle(paste("All Condition", cond, "Trials"), subtitle = "Correct and Incorrect Responses")) %>%
-    print()
-  
-  (n200 %>%
-    filter(Condition == cond) %>%
-    top_n(40*4096*8, Trial) %>% # bottom (largest or "top") 40 recordings for all 4096 samples from all 8 N200 channels
-    visualize(upper.bound = 600) +
-      ggtitle(paste("Condition", cond, "Trials - Second Half"), subtitle = "Correct and Incorrect Responses")) %>%
-    print()
-  
-  
-  (n200.no.fast.trials %>%
-    filter(Condition == cond) %>%
-    visualize(upper.bound = 600) +
-    ggtitle(paste("Reasonably Slow Condition", cond, "Trials"), subtitle = "Correct and Incorrect Responses")) %>%
-    print()
-  
-  (n200.no.fast.trials %>%
-    filter(Condition == cond) %>%
-    top_n(40*4096*8, Trial) %>%
-    visualize(upper.bound = 600) +
-    ggtitle(paste("Reasonable Slow Condtion", cond, "Trials from Second Half Only"), subtitle = "Correct and Incorrect Responses")) %>%
-    print()
+## Calculate features
 
-  dev.off()  
-}
-  
+mean.RT = mean(eeg.info$Reaction.Time.ms, na.rm = T)
 
+features = generate.features(eeg.data) %>%
+  left_join(eeg.info, by = "Trial") %>% # To add the reaction times to the data frame
+  mutate(RT.Above.Avg = Reaction.Time.ms > mean.RT,
+         RT.Percentile = ntile(Reaction.Time.ms, 10)) # Simpler response vars to predict
+
+## Old N200 calculations, to compare to new ones
+
+features.csv = read.csv("s112ses1_trialdataNAN.csv") %>%
+  mutate(Reaction.Time.ms = RT * 1000) %>%
+  mutate(N200 = N200latencies * 1000) %>%
+  mutate(RT.Above.Avg = Reaction.Time.ms > mean.RT)
+
+## Draw some trials
+
+eeg.data$N200.Data %>%
+  visualize.trials(features, 1:20)
+
+eeg.data$P300.Data %>%
+  visualize.trials(features, 20:40)
+
+## Modeling
+
+clean.trials = features %>%
+  filter(Reaction.Time.ms >= 350)
+
+# Histograms
+clean.trials %>% features.hist(N200)
+clean.trials %>% features.hist(P300)
+clean.trials %>% features.hist(Reaction.Time.ms)
+
+# Boxplot of N200 separated by RT.Above.Avg
+ggplot(clean.trials, aes(RT.Above.Avg, N200)) + 
+  geom_boxplot() + 
+  xlab("Reaction Time Above Average?")
+
+# Boxplot of N200 separated by RT.Percentile
+# Note that early RT groups won't appear because they are too quick
+ggplot(clean.trials, aes(factor(RT.Percentile), N200)) +
+  geom_boxplot() +
+  xlab("Reaction Time Percentile")
+
+# Boxplot of P300 separated by RT.Above.Avg
+ggplot(clean.trials, aes(RT.Above.Avg, P300)) + 
+  geom_boxplot() + 
+  xlab("Reaction Time Above Average?")
+
+# Boxplot of P300 separated by RT.Percentile
+ggplot(clean.trials, aes(factor(RT.Percentile), P300)) +
+  geom_boxplot() +
+  xlab("Reaction Time Percentile")
+
+# Modeling RT.Above.Avg
+glm(RT.Above.Avg ~ N200, family = "binomial",
+    data = clean.trials) %>%
+  summary()
+
+# Modeling RT
+lm(RT.Percentile ~ N200 + P300, data = clean.trials) %>%
+  summary()

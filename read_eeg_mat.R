@@ -2,126 +2,125 @@ library(R.matlab)
 library(parallel)
 library(dplyr)
 
-path.to.mat = "/share/data/cidlab/s112_ses1_sfinal.mat"
-
-#########
-
-file.name = strsplit(path.to.mat, "/")[[1]] %>% tail(n = 1) %>% sub(".mat", '', .)
-
-## First, check if we already converted this matlab file to our .RData format
-
-rdata.file.name = paste(file.name, ".RData", sep = '')
-
-if(file.exists(rdata.file.name))
+read.eeg.mat = function(path.to.mat)
 {
-  print("Formatted RData exists, reading it directly...")
+  ## First, check if we already converted this matlab file to our .RData format
   
-  load(rdata.file.name)
-  return(list(Data = eeg.data, Info = eeg.info))
+  rdata.file.name = path.to.mat %>% 
+    extract.file.name() %>%
+    paste(. , ".RData", sep = '')
+  
+  if(file.exists(rdata.file.name))
+  {
+    print("Formatted RData exists, reading it directly...")
+    
+    load(rdata.file.name)
+    return(list(N200.Data = N200.data, P300.Data = P300.data, Info = eeg.info))
+  }
+  
+  ## Begin formatting by loading the filtered EEG data
+  
+  eeg.matlab = read.mat.file(path.to.mat)
+  
+  N200.data = eeg.matlab$stimlocked[[3]]
+  P300.data = eeg.matlab$stimlocked[[11]]
+  num.trials = dim(N200.data)[2]
+  
+  sample.rate = eeg.matlab$sr[1,1] / 1000 # in samples/ms
+  num.samples = dim(N200.data)[1]
+  stimulus.time.ms = match(0, eeg.matlab$stimlocked[[8]])
+  sample.times = 1:num.samples / sample.rate - stimulus.time.ms # stimulus-locked sample times
+  
+  reaction.times.ms = eeg.matlab$expinfo[[38]] / sample.rate
+  
+  conditions = eeg.matlab$expinfo[[36]]
+  correct = eeg.matlab$expinfo[[37]]
+  
+  ## Spare ourselves some memory
+  
+  rm(eeg.matlab)
+  
+  ## Create a cluster for faster function application
+  
+  print("Creating clusters...")
+  cluster = makeCluster(4)
+  clusterExport(cluster, c("sample.times", "reaction.times.ms", "conditions", "correct"),
+                envir = environment()) # Important! Defaults to global env
+  
+  ## Convert the matrix data to a data frame format
+  
+  print("Formatting the EEG samples data...")
+  N200.data = create.samples.df(cluster, num.trials, N200.data)
+  P300.data = create.samples.df(cluster, num.trials, P300.data)
+  
+  print("Formatting the reaction times data...")
+  eeg.info = create.trial.info.df(cluster, num.trials)
+  
+  stopCluster(cluster)
+  
+  ## Export the data frames so we don't have to do all this again next time
+  
+  print("Saving the formatted data for future use...")
+  save(N200.data, P300.data, eeg.info, file = rdata.file.name)
+  
+  list(N200.Data = N200.data, P300.Data = P300.data, Info = eeg.info)
+}
+
+create.samples.df = function(cluster, num.trials, data)
+{
+  df.format = function(trial) # The variables needed were exported to the cluster
+    data.frame(Trial = trial,
+               Sample.Val = data[, trial],
+               Time.ms = sample.times)
+  
+  parLapply(cluster, 1:num.trials, df.format) %>%
+    bind_rows()
+}
+
+create.trial.info.df = function(cluster, num.trials, data)
+{
+  df.format = function(trial) # The variables needed were exported to the cluster
+    data.frame(Trial = trial,
+             Reaction.Time.ms = reaction.times.ms[trial],
+             Condition = conditions[trial],
+             Correct = correct[trial])
+  
+  parLapply(cluster, 1:num.trials, df.format) %>%
+    bind_rows()
 }
 
 ## Convert the .mat to .rda, but maintaining the old structure that we need to format
 ## This takes a long time, so check if we already did this step earlier, too
-
-readMat.output.file.name = paste("readMat_output-", file.name, ".rds", sep = '') 
-
-if(file.exists(readMat.output.file.name))
+read.mat.file = function(path.to.mat)
 {
-  print("Unformatted RDS exists, reading it directly...")
-  eeg.matlab = readRDS(readMat.output.file.name)
+  readMat.output.file.name = path.to.mat %>% 
+    extract.file.name() %>%
+    paste("readMat_output-", . , ".rds", sep = '')
   
-} else
-{
-  print("No RDS exists, converting MAT file to RDS...")
-  eeg.matlab = readMat(path.to.mat)
+  if(file.exists(readMat.output.file.name))
+  {
+    print("Unformatted RDS exists, reading it directly...")
+    eeg.matlab = readRDS(readMat.output.file.name)
+    
+  } else
+  {
+    print("No RDS exists, converting MAT file to RDS...")
+    eeg.matlab = readMat(path.to.mat)
+    
+    print("Saving the unformatted RDS for future use...")
+    saveRDS(eeg.matlab, readMat.output.file.name)
+  }
   
-  print("Saving the unformatted RDS for future use...")
-  saveRDS(eeg.matlab, readMat.output.file.name)
+  eeg.matlab
 }
 
-## Begin formatting by loading the raw EEG data for subject 112
-
-eeg.data = eeg.matlab$data
-
-sample.rate = eeg.matlab$sr[1,1] / 1000 # in samples/ms
-num.samples = dim(eeg.data)[1]
-num.channels = dim(eeg.data)[2]
-num.trials = dim(eeg.data)[3]
-stimulus.time.ms = match(0, eeg.matlab$stimlocked[[8]])
-sample.times = 1:num.samples / sample.rate - stimulus.time.ms # stimulus-locked sample times
-
-channel.weights = eeg.matlab$stimlocked[[1]] %>%
-  data.frame(Channel = 1:length(.), Weight = .)
-
-## Load the 480 trial reaction times for subject 112
-
-reaction.times.ms = eeg.matlab$expinfo[[38]] / sample.rate
-
-## Load the condition identifiers for the 480 trials
-
-conditions = eeg.matlab$expinfo[[36]]
-
-## Load the correctness of the subject's 480 responses
-
-correct = eeg.matlab$expinfo[[37]]
-
-## Spare ourselves some memory
-
-rm(eeg.matlab)
-
-## Form a data frame of all samples for a given channel and trial
-
-create.samples.df = function(channel, trial)
-  data.frame(Channel = channel,
-             Trial = trial,
-             Sample.Val = eeg.data[, channel, trial ],
-             Time.ms = sample.times)
-
-## Form a data frame of the experiment results for a given trial
-## We want to keep this separate from the above data frame, because this
-##   info is redundant across all samples and all channels for the trial
-
-create.trial.info.df = function(trial)
-  data.frame(Trial = trial,
-             Reaction.Time.ms = reaction.times.ms[trial],
-             Condition = conditions[trial],
-             Correct = correct[trial])
-
-
-## Create a cluster for faster function application
-
-print("Creating clusters...")
-cluster = makeCluster(4)
-clusterExport(cluster, c("eeg.data", "sample.times", "reaction.times.ms", "conditions", "correct"),
-              envir = environment()) # Important! Defaults to global env
-
-## Get every combination of channel and trial
-
-channel.trial.combinations = expand.grid(1:num.channels, 1:num.trials) # kind of like a cartesian product
-channels.list = channel.trial.combinations$Var1 # unpacking the tuples
-trials.list = channel.trial.combinations$Var2
-
-## Call create.samples.df for every combination of channel and trial
-
-print("Formatting the EEG samples data...")
-samples.df.list = clusterMap(cluster, create.samples.df, channels.list, trials.list)
-
-## Call create.trial.info.df for every trial number
-
-print("Formatting the reaction times data...")
-trial.info.df.list = parLapply(cluster, 1:num.trials, create.trial.info.df)
-
-stopCluster(cluster)
-
-## Merge the data frames from the apply functions
-
-print("Merging the results of the clusters...")
-eeg.data = bind_rows(samples.df.list)
-eeg.info = bind_rows(trial.info.df.list)
-
-## Export the data frames so we don't have to do all this again next time
-
-print("Saving the formatted data for future use...")
-save(eeg.data, eeg.info, channel.weights, file = rdata.file.name)
-
-
+extract.file.name = function(path)
+{
+  path %>%
+    strsplit("/") %>%
+    unlist() %>%
+    tail(n = 1) %>%
+    strsplit("\\.") %>%
+    unlist() %>%
+    head(n = 1)
+}
