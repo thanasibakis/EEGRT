@@ -4,32 +4,22 @@ source("analyze.R")
 
 ###################
 
-## First, run read_eeg_mat.R
-## For some reason, cluster computing is not working when
-##   the code is in a function scope
-## So, we're keeping it as a script for now.
+## Retrieve subjects' data
 
-eeg.data = read.eeg.mat("/share/data/cidlab/s112_ses1_sfinal.mat")
-eeg.info = eeg.data$Info
+s112.ses1 = read.eeg.mat("/share/data/michael/exp7data/subjects/s112/ses1/s112_ses1_sfinal.mat")
+s112.ses2 = read.eeg.mat("/share/data/michael/exp7data/subjects/s112/ses2/s112_ses2_sfinal.mat")
+s116.ses1 = read.eeg.mat("/share/data/michael/exp7data/subjects/s116/ses1/s116_ses1_sfinal.mat")
+s143.ses1 = read.eeg.mat("/share/data/michael/exp7data/subjects/s143/ses1/s143_ses1_sfinal.mat")
 
-## We now have eeg.data, which contains the sample values
-##   for each trial and channel combination
-## We also have eeg.info, which contains the reaction times
-##   and conditions of each trial
-## You can left join these by trial when you need reaction times
-##   and samples in the same data frame
-## We also have channel.weights, which specifies the weights to
-##   use when averaging samples over all channels (instead of
-##   using even weights on only some channels)
+eeg.data = merge.sessions(s112.ses1, s112.ses2) # we require unique trial numbers!
   
 ## Calculate features
 
-mean.RT = mean(eeg.info$Reaction.Time.ms, na.rm = T)
-
 features = generate.features(eeg.data) %>%
-  left_join(eeg.info, by = "Trial") %>% # To add the reaction times to the data frame
-  mutate(RT.Above.Avg = Reaction.Time.ms > mean.RT,
-         RT.Percentile = ntile(Reaction.Time.ms, 10)) # Simpler response vars to predict
+  left_join(eeg.data$Info, by = "Trial") %>% # To add the reaction times to the data frame
+  mutate(RT.Above.Avg = Reaction.Time.ms > mean(Reaction.Time.ms),  # Simpler response vars to predict
+         RT.Percentile = ntile(Reaction.Time.ms, 10)) %>%
+  filter(Reaction.Time.ms >= 350)#
 
 ## Old N200 calculations, to compare to new ones
 
@@ -44,44 +34,66 @@ eeg.data$N200.Data %>%
   visualize.trials(features, 1:20)
 
 eeg.data$P300.Data %>%
-  visualize.trials(features, 20:40)
+  visualize.trials(features, 1:20)
 
 ## Modeling
 
-clean.trials = features %>%
-  filter(Reaction.Time.ms >= 350)
-
 # Histograms
-clean.trials %>% features.hist(N200)
-clean.trials %>% features.hist(P300)
-clean.trials %>% features.hist(Reaction.Time.ms)
+features.hist(features, N200)
+qqnorm(features$N200); qqline(features$N200)
+
+features.hist(features, P300)
+qqnorm(features$P300); qqline(features$P300)
+
+features.hist(features, Reaction.Time.ms)
+qqnorm(features$Reaction.Time.ms); qqline(features$Reaction.Time.ms)
+
 
 # Boxplot of N200 separated by RT.Above.Avg
-ggplot(clean.trials, aes(RT.Above.Avg, N200)) + 
+ggplot(features, aes(RT.Above.Avg, N200)) + 
   geom_boxplot() + 
   xlab("Reaction Time Above Average?")
+
+# Boxplot of P300 separated by RT.Above.Avg
+ggplot(features, aes(RT.Above.Avg, P300)) + 
+  geom_boxplot() + 
+  xlab("Reaction Time Above Average?")
+
 
 # Boxplot of N200 separated by RT.Percentile
 # Note that early RT groups won't appear because they are too quick
-ggplot(clean.trials, aes(factor(RT.Percentile), N200)) +
+ggplot(features, aes(factor(RT.Percentile), N200)) +
   geom_boxplot() +
   xlab("Reaction Time Percentile")
-
-# Boxplot of P300 separated by RT.Above.Avg
-ggplot(clean.trials, aes(RT.Above.Avg, P300)) + 
-  geom_boxplot() + 
-  xlab("Reaction Time Above Average?")
 
 # Boxplot of P300 separated by RT.Percentile
-ggplot(clean.trials, aes(factor(RT.Percentile), P300)) +
+ggplot(features, aes(factor(RT.Percentile), P300)) +
   geom_boxplot() +
   xlab("Reaction Time Percentile")
 
+
+# Plot of reaction time vs N200
+ggplot(features, aes(Reaction.Time.ms, N200)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  xlab("Reaction Time (ms)")
+
+# Plot of reaction time vs P300
+ggplot(features, aes(Reaction.Time.ms, P300)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  xlab("Reaction Time (ms)")
+
+
 # Modeling RT.Above.Avg
-glm(RT.Above.Avg ~ N200, family = "binomial",
-    data = clean.trials) %>%
+glm(RT.Above.Avg ~ N200 + P300, family = "binomial",
+    data = features) %>%
   summary()
 
-# Modeling RT
-lm(RT.Percentile ~ N200 + P300, data = clean.trials) %>%
+# Modeling RT.Percentile
+lm(RT.Percentile ~ N200 + P300, data = features) %>%
+  summary()
+
+# Modeling reaction time
+lm(Reaction.Time.ms ~ N200 + P300, data = features) %>%
   summary()
