@@ -2,13 +2,39 @@ library(R.matlab)
 library(parallel)
 library(dplyr)
 
+# Merges the results of multiple calls to read.eeg.mat, using unique trial numbers
+read.sessions = function(...)
+{
+  sessions = lapply(list(...), read.eeg.mat)
+  
+  trial.count = 0
+  
+  for(i in 1:length(sessions))
+  {
+    sessions[[i]]$N200.Data$Trial = sessions[[i]]$N200.Data$Trial + trial.count
+    sessions[[i]]$P300.Data$Trial = sessions[[i]]$P300.Data$Trial + trial.count
+    sessions[[i]]$Info$Trial = sessions[[i]]$Info$Trial + trial.count
+    
+    trial.count = trial.count + length(sessions[[i]]$Info$Trial)
+  }
+  
+  N200.Data = lapply(sessions, (function (session) session$N200.Data)) %>% bind_rows()
+  P300.Data = lapply(sessions, (function (session) session$P300.Data)) %>% bind_rows()
+  Info = lapply(sessions, (function (session) session$Info)) %>% bind_rows()
+  
+  list(N200.Data = N200.Data, P300.Data = P300.Data, Info = Info)
+}
+
+# Converts the Matlab matrix data in the given .mat file to an R data frame
 read.eeg.mat = function(path.to.mat)
 {
   ## First, check if we already converted this matlab file to our .RData format
   
+  dir.create("./data", showWarnings = F) # don't show warning if already exists
+
   rdata.file.name = path.to.mat %>% 
     extract.file.name() %>%
-    paste(. , ".RData", sep = '')
+    paste("./data/", . , ".RData", sep = '')
   
   if(file.exists(rdata.file.name))
   {
@@ -95,7 +121,7 @@ read.mat.file = function(path.to.mat)
 {
   readMat.output.file.name = path.to.mat %>% 
     extract.file.name() %>%
-    paste("readMat_output-", . , ".rds", sep = '')
+    paste("./rdata/", "readMat_output-", . , ".rds", sep = '')
   
   if(file.exists(readMat.output.file.name))
   {
@@ -123,27 +149,4 @@ extract.file.name = function(path)
     strsplit("\\.") %>%
     unlist() %>%
     head(n = 1)
-}
-
-# Merges the results of multiple calls to read.eeg.mat, using unique trial numbers
-merge.sessions = function(...)
-{
-  sessions = list(...)
-  
-  trial.count = 0
-  
-  for(i in 1:length(sessions))
-  {
-    sessions[[i]]$N200.Data$Trial = sessions[[i]]$N200.Data$Trial + trial.count
-    sessions[[i]]$P300.Data$Trial = sessions[[i]]$P300.Data$Trial + trial.count
-    sessions[[i]]$Info$Trial = sessions[[i]]$Info$Trial + trial.count
-    
-    trial.count = trial.count + length(sessions[[i]]$Info$Trial)
-  }
-  
-  N200.Data = lapply(sessions, (function (session) session$N200.Data)) %>% bind_rows()
-  P300.Data = lapply(sessions, (function (session) session$P300.Data)) %>% bind_rows()
-  Info = lapply(sessions, (function (session) session$Info)) %>% bind_rows()
-  
-  list(N200.Data = N200.Data, P300.Data = P300.Data, Info = Info)
 }

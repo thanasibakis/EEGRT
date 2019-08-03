@@ -61,20 +61,3 @@ features.hist = function(features.df, feature, bin.width = 25)
     facet_wrap( ~ Condition) +
     theme_minimal()
 }
-
-## Applies a filter to smooth the voltages
-smooth.data = function(dat)
-{
-  len = length(dat)
-  smoothed = rep(0, len)
-  
-  for(i in 1:len)
-  {
-    i.to.avg = (i + c(-4, 4)) %>% subset(. >= 1 & . <= len)
-    smoothed[i] = dat[i.to.avg] %>% mean()
-  }
-  
-  smoothed
-}
-  
-  
