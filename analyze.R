@@ -9,7 +9,6 @@ P300.BOUNDS = c(left = 275, right = 800)
 ## All features will average across all channels given
 generate.features = function(eeg.data)
 {
-  # Start with a data frame of just trial numbers, and add on later
   N200.peaks = eeg.data$N200.Data %>%
     inner_join(eeg.data$Info, by = "Trial") %>% # gain access to reaction times
     group_by(Trial) %>%
