@@ -121,7 +121,7 @@ read.mat.file = function(path.to.mat)
 {
   readMat.output.file.name = path.to.mat %>% 
     extract.file.name() %>%
-    paste("./rdata/", "readMat_output-", . , ".rds", sep = '')
+    paste("./data/", "readMat_output-", . , ".rds", sep = '')
   
   if(file.exists(readMat.output.file.name))
   {
