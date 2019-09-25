@@ -1,9 +1,13 @@
 library(dplyr)
 
+
+# Parameters to adjust the peak selection process
+
 DERIVATIVE.RATIO = 3
 
-N200.BOUNDS = c(left = 125, right = 350) # changed from 275)
+N200.BOUNDS = c(left = 125, right = 350)
 P300.BOUNDS = c(left = 275, right = 800)
+
 
 ## Various potential features of a model for reaction time
 ## All features will average across all channels given
@@ -22,6 +26,7 @@ generate.features = function(eeg.data)
   # Must full join the two peaks, because one can occur without the other
   full_join(N200.peaks, P300.peaks, by = c("Trial", "Condition", "Correct", "Reaction.Time.ms"), suffix = c(".N200", ".P300")) # must specify all "by", otherwise the suffix gets attached
 }
+
 
 # Returns the estimated time of occurance and amplitude for a peak near target.time but definitely within time.bounds
 peak.location = function(eeg.trial.data, target.time, positive, time.bounds, should.be.symmetric)
@@ -59,10 +64,10 @@ peak.location = function(eeg.trial.data, target.time, positive, time.bounds, sho
     return(head(peak, 0))
   else
     return(peak)
-  
-  # TODO: instead of saying there's no peak if the largest peak failed, try considering smaller peaks that may fit the bill
 }
 
+
+# Finds the inflection points around the given peak
 peak.inflection.points = function(eeg.trial.data, peak.time)
 {
   derivatives = eeg.trial.data %>%
@@ -75,6 +80,8 @@ peak.inflection.points = function(eeg.trial.data, peak.time)
     right = derivatives %>% filter(!Is.Left.Side) %>% pull(Time.ms) %>% min())
 }
 
+
+# Finds the average derivatives around the given peak (within the given range)
 peak.side.derivatives = function(eeg.trial.data, peak.time, peak.range)
 {
   derivatives = eeg.trial.data %>%

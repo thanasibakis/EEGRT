@@ -2,28 +2,6 @@ library(R.matlab)
 library(parallel)
 library(dplyr)
 
-# Merges the results of multiple calls to read.eeg.mat, using unique trial numbers
-read.sessions = function(...)
-{
-  sessions = lapply(list(...), read.eeg.mat)
-  
-  trial.count = 0
-  
-  for(i in 1:length(sessions))
-  {
-    sessions[[i]]$N200.Data$Trial = sessions[[i]]$N200.Data$Trial + trial.count
-    sessions[[i]]$P300.Data$Trial = sessions[[i]]$P300.Data$Trial + trial.count
-    sessions[[i]]$Info$Trial = sessions[[i]]$Info$Trial + trial.count
-    
-    trial.count = trial.count + length(sessions[[i]]$Info$Trial)
-  }
-  
-  N200.Data = lapply(sessions, (function (session) session$N200.Data)) %>% bind_rows()
-  P300.Data = lapply(sessions, (function (session) session$P300.Data)) %>% bind_rows()
-  Info = lapply(sessions, (function (session) session$Info)) %>% bind_rows()
-  
-  list(N200.Data = N200.Data, P300.Data = P300.Data, Info = Info)
-}
 
 # Converts the Matlab matrix data in the given .mat file to an R data frame
 read.eeg.mat = function(path.to.mat)
@@ -31,7 +9,7 @@ read.eeg.mat = function(path.to.mat)
   ## First, check if we already converted this matlab file to our .RData format
   
   dir.create("./data", showWarnings = F) # don't show warning if already exists
-
+  
   rdata.file.name = path.to.mat %>% 
     extract.file.name() %>%
     paste("./data/", . , ".RData", sep = '')
@@ -92,6 +70,32 @@ read.eeg.mat = function(path.to.mat)
   list(N200.Data = N200.data, P300.Data = P300.data, Info = eeg.info)
 }
 
+
+# Merges the results of multiple calls to read.eeg.mat, using unique trial numbers
+read.sessions = function(...)
+{
+  sessions = lapply(list(...), read.eeg.mat)
+  
+  trial.count = 0
+  
+  for(i in 1:length(sessions))
+  {
+    sessions[[i]]$N200.Data$Trial = sessions[[i]]$N200.Data$Trial + trial.count
+    sessions[[i]]$P300.Data$Trial = sessions[[i]]$P300.Data$Trial + trial.count
+    sessions[[i]]$Info$Trial = sessions[[i]]$Info$Trial + trial.count
+    
+    trial.count = trial.count + length(sessions[[i]]$Info$Trial)
+  }
+  
+  N200.Data = lapply(sessions, (function (session) session$N200.Data)) %>% bind_rows()
+  P300.Data = lapply(sessions, (function (session) session$P300.Data)) %>% bind_rows()
+  Info = lapply(sessions, (function (session) session$Info)) %>% bind_rows()
+  
+  list(N200.Data = N200.Data, P300.Data = P300.Data, Info = Info)
+}
+
+
+# Performs the conversion of sample data from matrix form to data frame form
 create.samples.df = function(cluster, num.trials, data)
 {
   df.format = function(trial) # The variables needed were exported to the cluster
@@ -103,6 +107,8 @@ create.samples.df = function(cluster, num.trials, data)
     bind_rows()
 }
 
+
+# Performs the conversion of trial information from matrix form to data frame form
 create.trial.info.df = function(cluster, num.trials, data)
 {
   df.format = function(trial) # The variables needed were exported to the cluster
@@ -114,6 +120,7 @@ create.trial.info.df = function(cluster, num.trials, data)
   parLapply(cluster, 1:num.trials, df.format) %>%
     bind_rows()
 }
+
 
 ## Convert the .mat to .rda, but maintaining the old structure that we need to format
 ## This takes a long time, so check if we already did this step earlier, too
@@ -140,6 +147,8 @@ read.mat.file = function(path.to.mat)
   eeg.matlab
 }
 
+
+# Trims a path to just the file name
 extract.file.name = function(path)
 {
   path %>%
