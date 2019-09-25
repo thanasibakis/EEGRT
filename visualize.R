@@ -1,6 +1,7 @@
 library(ggplot2)
 library(dplyr)
 
+
 ## Plot the EEG voltages over time, bounding the time axis if desired
 ## (If multiple trials are given, you should add a facet after)
 ## (If multiple channels are given, a band will show the variation among them)
@@ -14,6 +15,7 @@ visualize.eeg = function(data, lower.bound = 125, upper.bound = 800)
       theme_minimal() + 
       geom_hline(yintercept = 0, alpha = 0.5)
 }
+
 
 # Visualize trials' EEG data along with given N200, P300, & RT locations
 visualize.trials = function(data, trials, features, N200 = F, P300 = F, RT = F, ...)
@@ -32,15 +34,13 @@ visualize.trials = function(data, trials, features, N200 = F, P300 = F, RT = F, 
   if(N200)
     plot = plot +
       geom_vline(aes(xintercept = Time.ms.N200), col = "dark blue", alpha = 0.6, data = annotations, na.rm = T) +
-      geom_rect(aes(x = NULL, y = NULL, xmin = Range.Left.N200, xmax = Range.Right.N200), ymin = -Inf, ymax = Inf, alpha = 0.3, fill = "light blue", data = annotations, na.rm = T) +
-      geom_label(aes(x = Time.ms.N200, y = Sample.Val.N200 - 15), label = "N200", size = 2.5, data = annotations, na.rm = T)
-  
+      geom_rect(aes(x = NULL, y = NULL, xmin = Range.Left.N200, xmax = Range.Right.N200), ymin = -Inf, ymax = Inf, alpha = 0.3, fill = "light blue", data = annotations, na.rm = T)
+      
   if(P300)
     plot = plot +
       geom_vline(aes(xintercept = Time.ms.P300), col = "dark green", alpha = 0.6, data = annotations, na.rm = T) +
-      geom_rect(aes(x = NULL, y = NULL, xmin = Range.Left.P300, xmax = Range.Right.P300), ymin = -Inf, ymax = Inf, alpha = 0.3, fill = "light green", data = annotations, na.rm = T) +
-      geom_label(aes(x = Time.ms.P300, y = Sample.Val.P300 + 15), label = "P300", size = 2.5, data = annotations, na.rm = T)
-  
+      geom_rect(aes(x = NULL, y = NULL, xmin = Range.Left.P300, xmax = Range.Right.P300), ymin = -Inf, ymax = Inf, alpha = 0.3, fill = "light green", data = annotations, na.rm = T)
+      
   # Must reset x,y = NULL for the rectangles...
   # https://stackoverflow.com/questions/25286629/different-geom-rect-objects-for-facets
   
@@ -52,6 +52,8 @@ visualize.trials = function(data, trials, features, N200 = F, P300 = F, RT = F, 
   plot
 }
 
+
+# Shortcut to plot a histogram of a model feature
 features.hist = function(features.df, feature, bin.width = 25)
 {
   feature = enquo(feature) # dplyr.tidyverse.org/articles/programming.html#different-expressions

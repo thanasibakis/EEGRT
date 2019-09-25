@@ -1,0 +1,158 @@
+---
+title: "Predictive Analyses of Reaction Time for EEG"
+author: "Thanasi Bakis"
+subtitle: Lab Report - Summer 2019
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include = F}
+source("read.R")
+source("visualize.R")
+source("analyze.R")
+```
+
+
+## Retrieving the Data
+
+All subjects' data are processed with signal filters, averaged across channels using principal component analysis (twice, to examine the N200 and P300), and given to us in a Matlab matrix form. To faciliate the use of R's plotting and modeling functions, we convert each subject's data to R data frame form. From each subject data file, three data frames are created:
+
+1. `N200.Data`, which contains the samples of all trials for the subject, averaged across channels with PCA (to examine for N200 activity). Each row is a sample, with columns `Trial`, `Time.ms`, and `Sample.Val`.
+
+2. `P300.Data`, which contains the samples of all trials for the subject, averaged across channels with PCA (to examine for P300 activity). Each row is a sample, with columns `Trial`, `Time.ms`, and `Sample.Val`.
+
+3. `Info`, which contains non-sampled data about all trials for the subject. Each row is a trial, with columns `Reaction.Time.ms`, `Condition`, and `Correct`. This information is stored here in a separate data frame, instead of the sample data frame, since it is constant across all samples in the trial and would be repeated many times in that data frame.
+
+Once each subject's data is converted, the data is merged across subjects 112 (both sessions), 116 (session 1), and 143 (session 1), to provide sufficient data to the model. Other subjects and sessions may be used, if desired. The resulting `eeg` data structure is a list containing the three data frames (`N200.Data`, `P300.Data`, and `Info`), each merged across all the given subjects and sessions. Trial numbers are incremented across subjects to ensure uniqueness.
+
+Note this procedure can take time initially. Upon the first run, an intermediate form of the data will be saved (the conversion of the Matlab matrix to an R matrix), as well as the final output (the desired R data frame). This allows subsequent function calls to avoid part or all of the conversion. If the original data is changed and the procedure needs to be re-run from scratch, these intermediate files should be deleted.
+
+```{r read.sessions, results = "hide"}
+
+root = "/share/data/michael/exp7data/subjects"
+
+eeg = read.sessions("/share/data/michael/exp7data/subjects/s112/ses1/s112_ses1_sfinal.mat",
+                    "/share/data/michael/exp7data/subjects/s112/ses2/s112_ses2_sfinal.mat",
+                    "/share/data/michael/exp7data/subjects/s116/ses1/s116_ses1_sfinal.mat",
+                    "/share/data/michael/exp7data/subjects/s143/ses1/s143_ses1_sfinal.mat")
+```
+
+
+## Locating the Peaks
+
+Given the data frames, we attempt to select trials that are suitable to include in the model predicting reaction time from peak locations. To be included in this `features` data frame, a trial must include at least one of the two peaks, as well as have a reaction time of at least 350 ms. Notable columns in this data frame include:
+
+1. `Trial`, the unique trial number,
+
+2. `Time.ms.N200`, the time (in ms) of the located N200 peak,
+
+3. `Sample.Val.N200`, the sample value at the time of the N200,
+
+4. `Time.ms.P300`, the time (in ms) of the located P300 peak,
+
+5. `Sample.Val.P300`, the sample value at the time of the P300,
+
+6. `Reaction.Time.ms`, the subject's reaction time in the given trial,
+
+7. `Condition`, the condition ID number of the given trial, and
+
+8. `Correct`, a binary indicator of the subject's correctness in the given trial.
+
+Other columns were used in the peak locating process and may be of interest. These include:
+
+9. `Range.Left.N200`, the time (in ms) of the "start" of the N200 peak (determined by the inflection point left of the curve's peak),
+
+10. `Range.Right.N200`, the time (in ms) of the "end" of the N200 peak (determined by the inflection point right of the curve's peak),
+
+11. `Derivative.Left.N200`, the average derivative between the start of the N200 and the N200 peak,
+
+12. `Derivative.Right.N200`, the average derivative between the N200 peak and the end of the N200,
+
+13. `Range.Left.P300`, the time (in ms) of the "start" of the P300 peak (determined by the inflection point left of the curve's peak),
+
+14. `Range.Right.P300`, the time (in ms) of the "end" of the P300 peak (determined by the inflection point right of the curve's peak),
+
+15. `Derivative.Left.P300`, the average derivative between the start of the P300 and the P300 peak, and
+
+16. `Derivative.Right.P300`, the average derivative between the P300 peak and the end of the P300.
+
+Note that this peak location process can take time.
+
+```{r features}
+features = generate.features(eeg) %>%
+  filter(Reaction.Time.ms >= 350)
+```
+
+
+## Visualizing the Peaks
+
+We draw a few trials to see where the N200 and P300 peaks were detected, to verify the algorithm works as desired. The N200 peaks are highlighted blue, and the P300 peaks are green.
+
+```{r}
+some.trials = features %>%
+  pull(Trial) %>%
+  head(16)
+
+eeg$N200.Data %>%
+  visualize.trials(some.trials, features, N200 = T, RT = T)
+
+eeg$P300.Data %>%
+  visualize.trials(some.trials, features, P300 = T, RT = T)
+```
+
+We also plot histograms of the peak times to check that they are distributed approximately around 200 and 300 ms.
+
+```{r}
+features.hist(features, Time.ms.N200)
+qqnorm(features$Time.ms.N200); qqline(features$Time.ms.N200)
+
+features.hist(features, Time.ms.P300)
+qqnorm(features$Time.ms.P300); qqline(features$Time.ms.P300)
+```
+
+
+## Constructing the Models
+
+Our primary interest is to examine the relationship between the times of the N200 and P300 peaks, and the subjects' reaction times to the trials. In order to remove the correlation between the two peaks, the absolute P300 time is replaced with the offset of the P300 from the N200 time. 
+
+We first directly model the peaks with the reaction times. We find that the times of both peaks are highly significant predictors, although the R-squared is found to be 0.1601.
+
+```{r}
+features = mutate(features, P300.Offset.ms = Time.ms.P300 - Time.ms.N200)
+# eliminates correlation between N200 and P300 values
+
+model = lm(Reaction.Time.ms ~ Time.ms.N200 + P300.Offset.ms, data = features)
+summary(model)
+
+ggplot(model, aes(.fitted, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red") +
+  theme_minimal() +
+  xlab("Fitted Values") +
+  ylab("Residuals")
+
+```
+
+We also are interested in seeing if the P300 contains any information about the speed of processing, which is inversely proportional to the reaction time. We once again find the P300 to be highly significant, though with a R-squared of 0.2351.
+
+```{r}
+features = mutate(features, Inverse.RT.ms = 1 / (Reaction.Time.ms - Time.ms.N200))
+
+model = lm(Inverse.RT.ms ~ P300.Offset.ms, data = features)
+summary(model)
+
+ggplot(model, aes(.fitted, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red") +
+  theme_minimal() +
+  xlab("Fitted Values") +
+  ylab("Residuals")
+```
+
+Lastly, we are curious to see if the P300 information about speed is related to the subject's accuracy, although we fail to conclude evidence for this, seeing a large p-value for the P300.
+
+```{r}
+glm(Correct ~ P300.Offset.ms, family = "binomial", data = features) %>%
+  summary()
+```
